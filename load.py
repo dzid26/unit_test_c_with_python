@@ -14,9 +14,9 @@ import unittest.mock
 from typing import List, Optional, Union
 
 import cffi
-import pycparser.c_generator
+from pycparser import CParser, c_generator, c_ast
 
-Remove_Unknowns = """\
+prepend_defines = """\
 #define __attribute__(x)
 #define __restrict
 """
@@ -26,7 +26,7 @@ def load(
     source_files: Union[List[str], str],
     include_paths: Optional[List[str]] = None,
     compiler_options: Optional[List[str]] = None,
-    remove_unknowns: str = "",
+    define_unknown: str = "",
     module_name: str = "pysim_",
     avoid_cache: bool = False,
     en_code_coverage: bool = False,
@@ -77,7 +77,7 @@ def load(
 
     # Collect include files
     # TODO Remove inclusions inside comments
-    header_content = "".join(
+    directives = "".join(
         x[0]
         for x in re.findall(
             r"(\s*\#\s*("
@@ -88,13 +88,13 @@ def load(
     )
 
     # Preprocess include files
-    header_content = _RemoveStandardIncludes(header_content)
-    header_content = Remove_Unknowns + remove_unknowns + header_content
-    header_content = preprocess(header_content, include_paths, compiler_options)
+    directives = _RemoveStandardIncludes(directives)
+    directives = prepend_defines + define_unknown + directives
+    headers_content = preprocess(directives, include_paths, compiler_options)
 
     # Preprocess source code
     source_content = _RemoveStandardIncludes(source_content)
-    source_content = Remove_Unknowns + remove_unknowns + source_content
+    source_content = prepend_defines + define_unknown + source_content
     source_content = preprocess(source_content, include_paths, compiler_options)
 
     # Remove conflicts
@@ -107,32 +107,31 @@ def load(
     if "int main(" in source_content:
         # TODO REGEX
         source_content = source_content.replace("int main(", "int mpmain(")
-        header_content += "\nint mpmain(int argc, char **argv);\n"
+        headers_content += "\nint mpmain(int argc, char **argv);\n"
     elif "void main(" in source_content:
         # TODO REGEX
         source_content = source_content.replace("void main(", "void mpmain(")
-        header_content += "\nvoid mpmain(void argc, char **argv);\n"
+        headers_content += "\nvoid mpmain(void argc, char **argv);\n"
 
     # TODO Compile only if source_content is different than module_name.c
 
     # Prepend 'extern "Python+C" ' to functions declarations with no definitions
     try:
-        ast_header = pycparser.CParser().parse(header_content)
+        ast_header = CParser().parse(headers_content)
         header_generator = HeaderGenerator()
         header_generator.set_SourceContent(source_content)
-        header_content = header_generator.visit(ast_header)
+        headers_content = header_generator.visit(ast_header)
     except:
-        print()
         print(80 * "-")
         print("HEADER:")
-        print(header_content)
+        print(headers_content)
         print(80 * "-")
         print()
         raise
 
     # Run CFFI
     ffibuilder = cffi.FFI()
-    ffibuilder.cdef(header_content)
+    ffibuilder.cdef(headers_content)
     include_dirs = [x.replace("-I", "") for x in include_paths]
 
     extra_compile_args = []
@@ -193,22 +192,22 @@ def preprocess(source, include_paths, compiler_options):
             + include_paths
             + ["-E", "-P", "-"]
         )
+        print(command)
         return subprocess.check_output(
             command, input=source, universal_newlines=True
         )
     except:
         print()
         print(80 * "-")
-        print("SOURCE/HEADER:")
+        print("SOURCE/DIRECTIVES:")
         print(source)
         print(80 * "-")
         print()
         raise
 
-
-class HeaderGenerator(pycparser.c_generator.CGenerator):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class HeaderGenerator(c_generator.CGenerator):
+    def __init__(self):
+        super().__init__()
         self.functions = set()
         self.source_content = ""
 
@@ -218,7 +217,7 @@ class HeaderGenerator(pycparser.c_generator.CGenerator):
     def visit_Decl(self, n, *args, **kwargs):
         result = super().visit_Decl(n, *args, **kwargs)
 
-        if isinstance(n.type, pycparser.c_ast.FuncDecl):
+        if isinstance(n.type, c_ast.FuncDecl):
             # Is a function declaration
             if n.name in self.functions:
                 # Is already in functions
