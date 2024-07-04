@@ -170,6 +170,19 @@ def load(
         ]
         libraries += []
 
+    command = (
+        [
+            "gcc", "-x", "c",
+        ]
+        + extra_compile_args
+        + include_paths
+        + ["-"]
+    )
+    print(command)
+    subprocess.check_output(
+        command, input=source_content, universal_newlines=True
+    )
+    
     ffibuilder.set_source(
         module_name,
         source_content,
@@ -178,7 +191,8 @@ def load(
         libraries=libraries,
         extra_link_args=extra_link_args,
     )
-    ffibuilder.compile()
+    ffibuilder.dlopen(module_name + ".so")
+    # ffibuilder.compile()
 
     # Import and return resulting module
     module = importlib.import_module(module_name)
