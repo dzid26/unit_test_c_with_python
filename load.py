@@ -27,6 +27,7 @@ def load(
     include_paths: Optional[List[str]] = None,
     compiler_options: Optional[List[str]] = None,
     define_unknown: str = "",
+    blacklist: Optional[List[str]] = None,
     module_name: str = "pysim_",
     avoid_cache: bool = False,
     en_code_coverage: bool = False,
@@ -118,6 +119,7 @@ def load(
     # Prepend 'extern "Python+C" ' to functions declarations with no definitions
     try:
         ast_header = CParser().parse(headers_content)
+        ast_header = remove_blacklisted_objects(ast_header)
         header_generator = HeaderGenerator()
         header_generator.set_SourceContent(source_content)
         headers_content = header_generator.visit(ast_header)
@@ -204,6 +206,29 @@ def preprocess(source, include_paths, compiler_options):
         print(80 * "-")
         print()
         raise
+
+def has_blacklisted_subfield(node, blacklist):
+    """
+    Check if the node or any of its subfields have a name in the blacklist.
+    """
+    if hasattr(node, 'name') and node.name in blacklist:
+        return True
+
+    if hasattr(node, 'children'):
+        for _, child in node.children():
+            if has_blacklisted_subfield(child, blacklist):
+                return True
+    
+    return False
+
+# remove problematic objects
+def remove_blacklisted_objects(ast):
+    blacklist = ["FlagStatus", "ErrorStatus", "FunctionalState", "BitAction", "BitStatus", "ITStatus"]
+    new_ext = []
+    for ext in ast.ext:
+        if not has_blacklisted_subfield(ext, blacklist):
+            new_ext.append(ext)
+    ast.ext = new_ext
 
 class HeaderGenerator(c_generator.CGenerator):
     def __init__(self):
