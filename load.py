@@ -19,6 +19,10 @@ from pycparser import CParser, c_generator, c_ast
 prepend_defines = """\
 #define __attribute__(x)
 #define __restrict
+#define __inline__
+#define __volatile__(x)
+#define __extension__
+#define __builtin_va_list char *
 """
 
 
